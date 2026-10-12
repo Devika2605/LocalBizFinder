@@ -1,0 +1,1 @@
+{"name":"localbizfinder","version":"1.0.0","description":"Location Finder for Group C (salons, spas, gyms, turfs, tours & travels)","main":"server.js","scripts":{"start":"node server.js"},"engines":{"node":">=18"},"dependencies":{"dotenv":"^16.4.5","exceljs":"^4.4.0","express":"^4.19.2"}}
