@@ -4,6 +4,9 @@ Finds salons, spas, gyms, turfs/playgrounds and tours & travels in any Indian ci
 business has an **Active / Inactive / No website**, ranks prospects with a lead score, exports to Excel, and
 keeps a lead-tracking sheet. The API key stays on the server (`.env`), never in the browser or GitHub.
 
+**Deployed web** : https://localbizfinder.onrender.com/
+
+
 ## 1. Run it
 1. Install **Node.js 18 or newer** (https://nodejs.org). Check with `node -v`.
 2. Open a terminal in this folder and run:
@@ -35,13 +38,3 @@ With an empty `.env` it uses free **OpenStreetMap** (no card, no key, but few ph
 - Lead score (0–100): no website +40, inactive +35, phone +20, rating above 3 up to +15, review count up to +15, open now +5.
 - Websites using only Facebook / Instagram / Justdial etc. are labelled **No website** (they still need a real site).
 
-## 4. Manual test checklist (required)
-Search at least 3 locations; compare 5+ rows with Google Maps; open a few websites to confirm the status label;
-open the downloaded Excel and confirm it matches the table; check the layout on your phone.
-
-## 5. Notes
-- Website check: HTTP 200–399 (or 401/403/405/429 = bot-blocked but alive) = Active; errors/timeouts/4xx/5xx = Inactive.
-  Some sites block bots, so verify borderline cases by hand.
-- Photos are intentionally not shown: the brief allows only real photos from the business's own Google Maps pin, used with the owner's permission.
-- To host online, use a Node host whose free plan allows your use (set the env vars there; never commit `.env`).
-- Map tiles/Leaflet/fonts load from the internet, so you need a connection.
