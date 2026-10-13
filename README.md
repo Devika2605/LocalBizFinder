@@ -6,7 +6,6 @@ keeps a lead-tracking sheet. The API key stays on the server (`.env`), never in 
 
 **Deployed web** : https://localbizfinder.onrender.com/
 
-
 ## 1. Run it
 1. Install **Node.js 18 or newer** (https://nodejs.org). Check with `node -v`.
 2. Open a terminal in this folder and run:
