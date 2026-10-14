@@ -37,6 +37,10 @@ td input,td select{margin:0;padding:6px 8px;min-width:110px}code,pre{background:
 @media(max-width:1050px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){body{display:block}aside{width:auto;height:auto;position:static;padding:12px;display:flex;gap:6px;overflow-x:auto}.logo,.grp{display:none}nav{display:flex}main{padding:16px}h1{font-size:26px}}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}}
+.gen{background:#fff;color:var(--navy);border:1.5px solid var(--navy);border-radius:8px;padding:6px 10px;font:500 12px Inter;cursor:pointer;white-space:nowrap}.gen:hover:not(:disabled){background:var(--navy);color:#fff}.gen:disabled{opacity:.4;cursor:not-allowed;border-color:var(--line);color:var(--mut)}
+.gen.dl{text-decoration:none;display:inline-block;padding:6px 9px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 8px}.chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:7px 14px;font:500 13px Inter;cursor:pointer;color:var(--ink)}.chip.on{background:var(--navy);color:#fff;border-color:var(--navy)}.chip small{opacity:.7;margin-left:4px;font-size:12px}
+.Checking,.Unchecked{background:#eef2ff;color:#4350a8}#sum .spin{width:12px;height:12px;border-width:2px;margin:0 4px 0 0}
 </style></head><body>
 <aside><div class="logo">LocalBizFinder<small>Find · Connect · Grow</small></div>
 <nav><button data-v="search" class="on">Search</button><button data-v="saved">Saved Leads</button><button data-v="reports">Reports</button><button data-v="about">About</button></nav>
@@ -48,11 +52,12 @@ td input,td select{margin:0;padding:6px 8px;min-width:110px}code,pre{background:
 <button class="pri" id="go">Search</button></div>
 <div id="err" class="err hide" role="alert"></div>
 <div class="stats" id="stats"></div>
+<div class="chips" id="chips"></div><p class="mut" id="sum" style="margin:0 0 12px"></p>
 <div class="grid"><div class="card"><div class="tools"><h2 id="ttl">Businesses</h2>
 <label><input type="checkbox" id="gap"> Only no website / inactive</label>
 <label>Sort by <select id="sort"><option value="score">Lead score</option><option value="rating">Rating</option><option value="reviews">Reviews</option><option value="name">Name</option><option value="status">Website status</option></select></label>
 <button class="xl" id="exp">Export Excel</button></div>
-<div class="tw"><table><thead><tr><th>Name</th><th>Category</th><th>Address</th><th>Rating</th><th>Opening hours</th><th>Website</th><th>Status</th><th>Phone</th><th>Score</th><th>Map</th><th>Save</th></tr></thead><tbody id="tb"></tbody></table></div>
+<div class="tw"><table><thead><tr><th>Name</th><th>Category</th><th>Address</th><th>Rating</th><th>Opening hours</th><th>Website</th><th>Status</th><th>Phone</th><th>Score</th><th>Map</th><th>Site</th><th>Save</th></tr></thead><tbody id="tb"></tbody></table></div>
 <div id="empty" class="msg">Enter a location and press Search.</div>
 <div class="pg"><span id="info" class="mut"></span><span><button id="pv">‹</button> <span id="pn"></span> <button id="nx">›</button></span><label class="mut">Rows <select id="pp"><option>10</option><option>25</option><option>50</option></select></label></div></div>
 <div class="card"><div id="map"></div><div id="det"><span class="mut">Select a business to see details.</span></div></div></div></section>
@@ -70,26 +75,29 @@ td input,td select{margin:0;padding:6px 8px;min-width:110px}code,pre{background:
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const $=s=>document.querySelector(s),NA='Not available',esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let rows=[],view=[],sel=null,page=1,chip='all',meta={},map,layer,loc='';
+let rows=[],view=[],sel=null,page=1,chip='all',meta={},map,layer,loc='',cc='all',runId=0,pending=0;
+const CATLBL={'Salon':'Salons','Spa':'Spas','Gym':'Gyms','Turf':'Turfs & Playgrounds','Tours & Travels':'Tours & Travels'};
 const getS=()=>JSON.parse(localStorage.getItem('lbf')||'{}'),putS=o=>localStorage.setItem('lbf',JSON.stringify(o));
 const cls=s=>s==='No website'?'NoW':s;
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('section').forEach(s=>s.classList.toggle('hide',s.id!=='v-'+b.dataset.v));if(b.dataset.v==='search'&&map)setTimeout(()=>map.invalidateSize(),50);if(b.dataset.v==='saved')renderSaved()});
 function err(m){const e=$('#err');e.textContent=m;e.classList.toggle('hide',!m)}
 async function search(){
  loc=$('#loc').value.trim();if(!loc)return err('Enter a city or area first.');err('');
- $('#empty').innerHTML='<span class="spin"></span>Searching and checking websites… this can take up to a minute.';$('#empty').classList.remove('hide');$('#tb').innerHTML='';$('#go').disabled=true;
+ $('#empty').innerHTML='<span class="spin"></span>Searching… the table appears first, then websites are verified in the background.';$('#empty').classList.remove('hide');$('#tb').innerHTML='';$('#go').disabled=true;
  try{const r=await fetch(`/api/search?location=${encodeURIComponent(loc)}&category=${encodeURIComponent($('#cat').value)}`);const j=await r.json();if(!r.ok)throw new Error(j.error||'Search failed');
-  rows=j.rows;meta=j;page=1;chip='all';sel=null;apply();report();if(!rows.length)err('No businesses found. Try a wider area or another category.')}
+  rows=j.rows;meta=j;page=1;chip='all';cc='all';sel=null;runId++;apply();report();
+  if(!rows.length)err('No businesses found. Try a wider area or another category.');
+  else{if(j.truncated)err('Partial results: reached the safety limit of '+j.requests+' Google requests. Search a smaller area or one category, or raise MAX_REQUESTS in .env.');verify(runId)}}
  catch(e){rows=[];apply();err(e.message+' (Check your internet connection and the .env settings.)')}
  finally{$('#go').disabled=false}}
 function apply(){
- let v=rows.filter(r=>chip==='all'||(chip==='open'?r.openNow===true:r.websiteStatus===chip));
- if($('#gap').checked)v=v.filter(r=>r.websiteStatus!=='Active');
- const k=$('#sort').value,o={'No website':0,Inactive:1,Active:2};
+ let v=rows.filter(r=>(cc==='all'||r.category===cc)&&(chip==='all'||(chip==='open'?r.openNow===true:r.websiteStatus===chip)));
+ if($('#gap').checked)v=v.filter(r=>r.websiteStatus==='No website'||r.websiteStatus==='Inactive');
+ const k=$('#sort').value,o={'No website':0,Inactive:1,Active:2,Checking:3,Unchecked:4};
  v.sort((a,b)=>k==='name'?a.name.localeCompare(b.name):k==='status'?o[a.websiteStatus]-o[b.websiteStatus]:(b[k]||0)-(a[k]||0));
- view=v;const n=rows.length,c=f=>rows.filter(f).length,p=x=>n?Math.round(100*x/n)+'%':'–';
+ view=v;const base=cc==='all'?rows:rows.filter(r=>r.category===cc),n=base.length,c=f=>base.filter(f).length,p=x=>n?Math.round(100*x/n)+'%':'–';
  const S=[['all','Total businesses',n,''],['open','Open now',c(r=>r.openNow===true),p(c(r=>r.openNow===true))],['Active','Active website',c(r=>r.websiteStatus==='Active'),p(c(r=>r.websiteStatus==='Active'))],['No website','No website',c(r=>r.websiteStatus==='No website'),p(c(r=>r.websiteStatus==='No website'))],['Inactive','Inactive website',c(r=>r.websiteStatus==='Inactive'),p(c(r=>r.websiteStatus==='Inactive'))]];
- $('#stats').innerHTML=S.map(s=>`<button class="card stat ${chip===s[0]?'on':''}" data-c="${s[0]}"><b>${s[2]}</b>${s[1]}<br><span>${s[3]||(n?'in '+esc(loc):'')}</span></button>`).join('');
+ chipsAndSum(base);$('#stats').innerHTML=S.map(s=>`<button class="card stat ${chip===s[0]?'on':''}" data-c="${s[0]}"><b>${s[2]}</b>${s[1]}<br><span>${s[3]||(n?'in '+esc(loc):'')}</span></button>`).join('');
  document.querySelectorAll('.stat').forEach(b=>b.onclick=()=>{chip=b.dataset.c;page=1;apply()});
  const pp=+$('#pp').value,pages=Math.max(1,Math.ceil(v.length/pp));page=Math.min(page,pages);const sl=v.slice((page-1)*pp,page*pp),sv=getS();
  $('#ttl').textContent=`Businesses (${v.length})`;$('#pn').textContent=`Page ${page} of ${pages}`;$('#info').textContent=v.length?`Showing ${(page-1)*pp+1}–${(page-1)*pp+sl.length} of ${v.length}`:'';
@@ -97,7 +105,7 @@ function apply(){
  $('#tb').innerHTML=sl.map(r=>`<tr class="row ${sel&&sel.id===r.id?'on':''}" data-id="${esc(r.id)}"><td><div class="nm"><div class="av">${esc(r.name[0])}</div><div><b>${esc(r.name)}</b></div></div></td><td>${esc(r.category)}</td><td class="mut" style="min-width:160px">${esc(r.address||NA)}</td>
  <td>${r.rating?`★ ${r.rating} <span class="mut">(${r.reviews||0})</span>`:NA}</td><td>${r.openNow===true?'<span class="on-dot">● Open</span>':r.openNow===false?'<span class="off-dot">● Closed</span>':''}<div class="hrs" title="${esc(r.hours||'')}">${esc(r.hours||NA)}</div></td>
  <td>${r.website?`<a href="${esc(/^https?:/.test(r.website)?r.website:'https://'+r.website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open ↗</a>`:NA}</td><td><span class="pill ${cls(r.websiteStatus)}">${r.websiteStatus}</span></td><td>${esc(r.phone||NA)}</td><td>${r.score}</td>
- <td><a href="${esc(r.mapUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Map</a></td><td><button class="ic" data-s="${esc(r.id)}" aria-label="Save lead">${sv[r.id]?'★':'☆'}</button></td></tr>`).join('');
+ <td><a href="${esc(r.mapUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Map</a></td><td>${genCell(r)}</td><td><button class="ic" data-s="${esc(r.id)}" aria-label="Save lead">${sv[r.id]?'★':'☆'}</button></td></tr>`).join('');
  document.querySelectorAll('tr.row').forEach(t=>t.onclick=()=>select(rows.find(r=>r.id===t.dataset.id)));
  document.querySelectorAll('[data-s]').forEach(b=>b.onclick=e=>{e.stopPropagation();toggleSave(rows.find(r=>r.id===b.dataset.s))});
  drawMap()}
@@ -112,9 +120,15 @@ function drawMap(){if(!map){map=L.map('map').setView([20.6,78.9],4);L.tileLayer(
 const COLS=[['name','Name'],['category','Category'],['address','Address'],['phone','Phone'],['website','Website'],['websiteStatus','Website Status'],['rating','Rating'],['hours','Opening Hours'],['mapUrl','Map Link'],['score','Lead Score']].map(([key,header])=>({key,header,width:key==='hours'||key==='address'?40:22}));
 async function xl(columns,data,sheet,name){if(!data.length)return err('Nothing to export yet.');
  try{const r=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({columns,rows:data,sheet})});if(!r.ok)throw 0;const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download=name+'.xlsx';a.click()}catch{err('Export failed. Is the server still running?')}}
-$('#exp').onclick=()=>xl(COLS,view,'Businesses',`businesses-${loc||'export'}`);
-function report(){const c=meta.completeness||{},t=meta.count||0;const bar=(l,v)=>`<div>${l}: <b>${v}%</b><div class="bt"><i style="width:${v}%"></i></div></div>`;
- $('#rep').innerHTML=`<p>Source: <b>${(meta.provider||'').toUpperCase()}</b> · Location: <b>${esc(loc)}</b> · Businesses: <b>${t}</b></p>`+bar('Have phone number',c.phone)+bar('Have website listed',c.website)+bar('Have rating',c.rating)+bar('Have opening hours',c.hours)+`<p class="mut">Limitations: businesses missing from the data source cannot be found; website status is checked automatically (some sites block bots, so spot-check a few by hand); OpenStreetMap has no ratings.</p>`}
+$('#exp').onclick=()=>pending>0?err('Website verification is still running. Export after it finishes so the status column is complete.'):xl(COLS,view,'Businesses',`businesses-${loc||'export'}`);
+function report(){const c=meta.completeness||{},t=meta.count||0,st=s=>rows.filter(r=>r.websiteStatus===s).length,a=meta.area;
+ const bar=(l,v)=>`<div>${l}: <b>${v}%</b><div class="bt"><i style="width:${v}%"></i></div></div>`;
+ const km=a?Math.round((a.n-a.s)*111)+' × '+Math.round((a.e-a.w)*111*Math.cos(a.s*Math.PI/180))+' km':'';
+ $('#rep').innerHTML=`<p>Source: <b>${(meta.provider||'').toUpperCase()}</b> · Place: <b>${esc(meta.place||loc)}</b> · Businesses: <b>${t}</b>${meta.requests?` · API requests: <b>${meta.requests}</b>`:''}${km?` · Area searched ≈ <b>${km}</b>`:''}</p>
+ <p>By category: ${Object.keys(CATLBL).map(k=>CATLBL[k]+' <b>'+rows.filter(r=>r.category===k).length+'</b>').join(' · ')}</p>
+ <p>Websites: Active <b>${st('Active')}</b> · No website <b>${st('No website')}</b> · Inactive <b>${st('Inactive')}</b>${st('Checking')+st('Unchecked')?` · Not verified <b>${st('Checking')+st('Unchecked')}</b>`:''}</p>`
+ +bar('Have phone number',c.phone)+bar('Have website listed',c.website)+bar('Have rating',c.rating)+bar('Have opening hours',c.hours)
+ +`<p class="mut">Limitations: businesses missing from the data source cannot be found; website status is checked automatically (some sites block bots, so spot-check a few by hand); OpenStreetMap has no ratings.</p>`}
 const SB=[['contact',['Not contacted','Visited','Messaged','Called','Replied']],['outcome',['Pending','Preview shown','Deal agreed','Delivered','Refused']]];
 function renderSaved(){const s=Object.values(getS());$('#sempty').classList.toggle('hide',!!s.length);
  $('#sb').innerHTML=s.map(r=>`<tr data-id="${esc(r.id)}"><td><b>${esc(r.name)}</b><div class="mut">${esc(r.phone||NA)}</div></td><td>${esc(r.category)}</td><td>${esc(r.region)}</td><td><select data-f="contact">${SB[0][1].map(o=>`<option${o===r.contact?' selected':''}>${o}</option>`).join('')}</select></td>
@@ -124,4 +138,37 @@ $('#sb').onclick=e=>{if(e.target.dataset.d){const s=getS();delete s[e.target.clo
 $('#exs').onclick=()=>xl([['name','Business Name'],['category','Category'],['region','Region'],['phone','Phone'],['contact','Contact Status'],['preview','Preview Link'],['feedback','Owner Feedback'],['charge','Agreed Charge'],['outcome','Outcome'],['notes','Notes']].map(([key,header])=>({key,header})),Object.values(getS()),'Tracking','tracking-sheet');
 $('#go').onclick=search;$('#loc').onkeydown=e=>{if(e.key==='Enter')search()};['#gap','#sort','#pp'].forEach(s=>$(s).onchange=()=>{page=1;apply()});
 $('#pv').onclick=()=>{page=Math.max(1,page-1);apply()};$('#nx').onclick=()=>{page++;apply()};apply();
+
+const sites={},busy=new Set();
+const genCell=r=>busy.has(r.id)?'<button class="gen" disabled>Generating…</button>':sites[r.id]
+ ?`<button class="gen" onclick="event.stopPropagation();openGen('${esc(r.id)}')">View site</button> <a class="gen dl" href="${sites[r.id].url}" download="${esc(sites[r.id].filename)}" onclick="event.stopPropagation()" title="Download HTML" aria-label="Download HTML">⬇</a>`
+ :`<button class="gen" ${['No website','Inactive'].includes(r.websiteStatus)?'title="Create a preview website from the Google Maps details"':`disabled title="${r.websiteStatus==='Active'?'This business already has an active website':'Website is still being checked'}"`} onclick="event.stopPropagation();openGen('${esc(r.id)}')">Generate site</button>`;
+async function openGen(id){
+ const r=rows.find(x=>x.id===id);if(!r)return;
+ if(sites[id])return window.open(sites[id].url,'_blank');
+ if(busy.has(id))return;
+ const w=window.open('','_blank');if(w)w.document.write('<p style="font:16px system-ui;padding:24px">Generating website…</p>');
+ busy.add(id);err('');apply();
+ try{const res=await fetch('/api/site',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({row:r})});
+  const j=await res.json();if(!res.ok)throw new Error(j.error||'Could not generate the website');
+  const url=URL.createObjectURL(new Blob([j.html],{type:'text/html'}));sites[id]={url,filename:j.filename};
+  if(w)w.location.href=url;else window.open(url,'_blank');
+  if(j.notes.length)err(j.notes.join(' '))}
+ catch(e){if(w)w.close();err(e.message)}
+ finally{busy.delete(id);apply()}}
+
+function chipsAndSum(base){
+ $('#chips').innerHTML=rows.length?'<span class="mut">Filter:</span>'+['all',...Object.keys(CATLBL)].map(k=>`<button class="chip ${cc===k?'on':''}" data-k="${esc(k)}">${k==='all'?'All':CATLBL[k]} <small>${k==='all'?rows.length:rows.filter(r=>r.category===k).length}</small></button>`).join(''):'';
+ document.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{cc=b.dataset.k;page=1;apply()});
+ $('#sum').innerHTML=rows.length?`Showing <b>${view.length}</b> of <b>${base.length}</b> businesses in <b>${esc(meta.place||loc)}</b>${pending>0?` · <span class="spin"></span>Verifying websites… ${pending} left`:''}`:''}
+async function verify(id){
+ const todo=rows.filter(r=>r.websiteStatus==='Checking'),byId=new Map(rows.map(r=>[r.id,r]));pending=todo.length;apply();
+ for(let i=0;i<todo.length&&id===runId;i+=30){
+  const batch=todo.slice(i,i+30);
+  try{const res=await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:batch.map(r=>({id:r.id,website:r.website,phone:r.phone,rating:r.rating,reviews:r.reviews,openNow:r.openNow}))})});
+   const j=await res.json();if(id!==runId)return;if(!res.ok)throw 0;
+   j.results.forEach(x=>{const r=byId.get(x.id);if(r){r.websiteStatus=x.websiteStatus;r.score=x.score}})}
+  catch{if(id!==runId)return;batch.forEach(r=>{if(r.websiteStatus==='Checking')r.websiteStatus='Unchecked'})}
+  pending=Math.max(0,todo.length-(i+30));apply()}
+ if(id===runId){pending=0;apply();report()}}
 </script></body></html>
