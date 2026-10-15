@@ -55,6 +55,7 @@ td input,td select{margin:0;padding:6px 8px;min-width:110px}code,pre{background:
 <div class="chips" id="chips"></div><p class="mut" id="sum" style="margin:0 0 12px"></p>
 <div class="grid"><div class="card"><div class="tools"><h2 id="ttl">Businesses</h2>
 <label><input type="checkbox" id="gap"> Only no website / inactive</label>
+<label>Template <select id="tpl"><option value="auto">Auto (different per business)</option><option value="split">Split</option><option value="cover">Cover photo</option><option value="center">Centered</option><option value="bold">Bold dark</option></select></label>
 <label>Sort by <select id="sort"><option value="score">Lead score</option><option value="rating">Rating</option><option value="reviews">Reviews</option><option value="name">Name</option><option value="status">Website status</option></select></label>
 <button class="xl" id="exp">Export Excel</button></div>
 <div class="tw"><table><thead><tr><th>Name</th><th>Category</th><th>Address</th><th>Rating</th><th>Opening hours</th><th>Website</th><th>Status</th><th>Phone</th><th>Score</th><th>Map</th><th>Site</th><th>Save</th></tr></thead><tbody id="tb"></tbody></table></div>
@@ -139,17 +140,18 @@ $('#exs').onclick=()=>xl([['name','Business Name'],['category','Category'],['reg
 $('#go').onclick=search;$('#loc').onkeydown=e=>{if(e.key==='Enter')search()};['#gap','#sort','#pp'].forEach(s=>$(s).onchange=()=>{page=1;apply()});
 $('#pv').onclick=()=>{page=Math.max(1,page-1);apply()};$('#nx').onclick=()=>{page++;apply()};apply();
 
-const sites={},busy=new Set();
+const sites={},busy=new Set(),seeds={};
 const genCell=r=>busy.has(r.id)?'<button class="gen" disabled>Generating…</button>':sites[r.id]
- ?`<button class="gen" onclick="event.stopPropagation();openGen('${esc(r.id)}')">View site</button> <a class="gen dl" href="${sites[r.id].url}" download="${esc(sites[r.id].filename)}" onclick="event.stopPropagation()" title="Download HTML" aria-label="Download HTML">⬇</a>`
+ ?`<button class="gen" onclick="event.stopPropagation();openGen('${esc(r.id)}')">View site</button> <button class="gen" title="Re-roll: generate a different design" aria-label="New design" onclick="event.stopPropagation();reroll('${esc(r.id)}')">↻</button> <a class="gen dl" href="${sites[r.id].url}" download="${esc(sites[r.id].filename)}" onclick="event.stopPropagation()" title="Download HTML" aria-label="Download HTML">⬇</a>`
  :`<button class="gen" ${['No website','Inactive'].includes(r.websiteStatus)?'title="Create a preview website from the Google Maps details"':`disabled title="${r.websiteStatus==='Active'?'This business already has an active website':'Website is still being checked'}"`} onclick="event.stopPropagation();openGen('${esc(r.id)}')">Generate site</button>`;
+function reroll(id){if(busy.has(id))return;delete sites[id];seeds[id]=(seeds[id]||0)+1;openGen(id)}
 async function openGen(id){
  const r=rows.find(x=>x.id===id);if(!r)return;
  if(sites[id])return window.open(sites[id].url,'_blank');
  if(busy.has(id))return;
  const w=window.open('','_blank');if(w)w.document.write('<p style="font:16px system-ui;padding:24px">Generating website…</p>');
  busy.add(id);err('');apply();
- try{const res=await fetch('/api/site',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({row:r})});
+ try{const res=await fetch('/api/site',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({row:r,options:{template:$('#tpl').value,seed:seeds[id]||0}})});
   const j=await res.json();if(!res.ok)throw new Error(j.error||'Could not generate the website');
   const url=URL.createObjectURL(new Blob([j.html],{type:'text/html'}));sites[id]={url,filename:j.filename};
   if(w)w.location.href=url;else window.open(url,'_blank');

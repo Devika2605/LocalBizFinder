@@ -25,12 +25,16 @@ const FIELDS = ['nextPageToken', 'places.id', 'places.displayName', 'places.form
 const cache = new Map(); // short-lived cache to protect your quota
 const memo = async (k, ttl, fn) => {
   const h = cache.get(k); if (h && Date.now() - h.t < ttl) return h.v;
-  const v = await fn(); cache.set(k, { t: Date.now(), v }); return v;
+  const v = await fn(); cache.set(k, { t: Date.now(), v });
+  if (cache.size > 300) cache.delete(cache.keys().next().value); // drop the oldest entry
+  return v;
 };
 
 async function geo(loc) { // free OpenStreetMap geocoder: place name -> bounding box
-  const g = await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=' +
-    encodeURIComponent(loc), { headers: { 'User-Agent': UA } })).json();
+  const gr = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=' +
+    encodeURIComponent(loc), { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15000) });
+  if (!gr.ok) throw new Error(`Location lookup failed (${gr.status}). Wait a moment and try again.`);
+  const g = await gr.json();
   if (!g.length) throw new Error('Location not found. Try e.g. "Shivamogga, Karnataka".');
   const [s, n, w, e] = g[0].boundingbox.map(Number); return { s, n, w, e, name: g[0].display_name };
 }
@@ -107,9 +111,11 @@ async function osm(loc, cat, budget) {
 // ---- website status: "quick" answer instantly, real check runs afterwards in batches (/api/check) ----
 const SOCIAL = /(^|\.)(facebook\.com|instagram\.com|fb\.com|wa\.me|linktr\.ee|youtube\.com|twitter\.com|x\.com|justdial\.com|sulekha\.com)$/i;
 const norm = u => /^https?:/i.test(u) ? u : 'https://' + u;
+const PRIVATE = /^(localhost|.*\.local|.*\.internal|0\.0\.0\.0|127\..*|10\..*|192\.168\..*|169\.254\..*|172\.(1[6-9]|2\d|3[01])\..*|\[?::1?\]?|\[?f[cd][0-9a-f]{2}:.*)$/i;
 function quick(url) {
-  if (!url) return 'No website';
-  let host; try { host = new URL(norm(url)).hostname; } catch { return 'Inactive'; }
+  if (!url || typeof url !== 'string') return 'No website';
+  let host; try { const u = new URL(norm(url)); if (!/^https?:$/.test(u.protocol)) return 'Inactive'; host = u.hostname; } catch { return 'Inactive'; }
+  if (PRIVATE.test(host)) return 'Inactive'; // never fetch internal addresses
   if (SOCIAL.test(host)) return 'No website'; // social/listing page only = no real website
   const h = cache.get('w:' + norm(url)); if (h && Date.now() - h.t < 6 * 3600e3) return h.v;
   return 'Checking';
@@ -140,6 +146,7 @@ app.get('/api/search', async (req, res) => {
   try {
     const loc = (req.query.location || '').trim(), cat = req.query.category || 'All';
     if (!loc) return res.status(400).json({ error: 'Enter a location.' });
+    if (loc.length > 120) return res.status(400).json({ error: 'Location is too long.' });
     if (cat !== 'All' && !CATS[cat]) return res.status(400).json({ error: 'Unknown category.' });
     if (PROVIDER === 'google' && !KEY) return res.status(400).json({ error: 'PROVIDER=google but GOOGLE_PLACES_API_KEY is empty in .env' });
     const cats = cat === 'All' ? Object.keys(CATS) : [cat];
@@ -164,21 +171,24 @@ app.get('/api/search', async (req, res) => {
 
 app.post('/api/check', async (req, res) => { // the page calls this in batches after the table is shown
   try {
-    const items = (req.body?.rows || []).slice(0, 40);
+    const items = (Array.isArray(req.body?.rows) ? req.body.rows : []).filter(r => r && typeof r === 'object').slice(0, 40);
     await pool(items, 15, async r => { r.websiteStatus = await check(r.website); r.score = score(r); });
     res.json({ results: items.map(r => ({ id: r.id, websiteStatus: r.websiteStatus, score: r.score })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/export', async (req, res) => {
-  const { columns = [], rows = [], sheet = 'Businesses' } = req.body || {};
-  const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet(String(sheet).slice(0, 30));
-  ws.columns = columns.map(c => ({ header: c.header, key: c.key, width: c.width || 22 }));
-  ws.getRow(1).font = { bold: true };
-  rows.forEach(r => ws.addRow(Object.fromEntries(columns.map(c => [c.key, r[c.key] == null || r[c.key] === '' ? 'Not available' : r[c.key]]))));
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="export.xlsx"');
-  await wb.xlsx.write(res); res.end();
+  try {
+    const { columns = [], rows = [], sheet = 'Businesses' } = req.body || {};
+    if (!Array.isArray(columns) || !Array.isArray(rows)) return res.status(400).json({ error: 'Invalid export data.' });
+    const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet(String(sheet).replace(/[\\\/?*\[\]:]/g, ' ').slice(0, 30) || 'Sheet1'); // Excel forbids \ / ? * [ ] : in sheet names
+    ws.columns = columns.map(c => ({ header: c.header, key: c.key, width: c.width || 22 }));
+    ws.getRow(1).font = { bold: true };
+    rows.forEach(r => ws.addRow(Object.fromEntries(columns.map(c => [c.key, r[c.key] == null || r[c.key] === '' ? 'Not available' : r[c.key]]))));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="export.xlsx"');
+    await wb.xlsx.write(res); res.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); else res.end(); }
 });
 
 const PORT = process.env.PORT || 3000;
